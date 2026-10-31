@@ -1,0 +1,10 @@
+{
+  "name": "weather-aware-truck-routing",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @watr/frontend dev",
+    "build": "pnpm --filter @watr/frontend build",
+    "lint": "pnpm --filter @watr/frontend lint",
+    "typecheck": "pnpm --filter @watr/frontend typecheck"
+  }
+}
