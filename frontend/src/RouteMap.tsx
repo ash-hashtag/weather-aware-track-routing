@@ -2,9 +2,14 @@ import type { FeatureCollection } from 'geojson'
 import * as maplibregl from 'maplibre-gl'
 import type { GeoJSONSource, MapLayerMouseEvent } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url'
 import { useEffect, useRef, useState } from 'react'
 import type { Checkpoint, Plan } from './api'
 import { RISK_COLORS, RISK_NAMES, formatTime } from './format'
+
+// maplibre builds its worker URL at runtime, which bundlers can't see; importing it with
+// `?url` makes Vite emit the file and gives us its hashed production URL.
+maplibregl.setWorkerUrl(workerUrl)
 
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/positron'
 const US_CENTER: [number, number] = [-98.6, 39.8]

@@ -15,13 +15,19 @@ def _env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
+# Vercel sets VERCEL=1 in builds and functions; default to production behaviour there so a
+# missing env var can never expose debug pages publicly.
+ON_VERCEL = os.environ.get("VERCEL") == "1"
+
+DEBUG = os.environ.get("DJANGO_DEBUG", "0" if ON_VERCEL else "1") == "1"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 if not SECRET_KEY:
     if not DEBUG:
         raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG=0")
     SECRET_KEY = "django-insecure-dev-only"
-ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+ALLOWED_HOSTS = _env_list(
+    "DJANGO_ALLOWED_HOSTS", ".vercel.app" if ON_VERCEL else "localhost,127.0.0.1"
+)
 
 INSTALLED_APPS = [
     "django.contrib.staticfiles",
