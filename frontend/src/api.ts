@@ -27,6 +27,31 @@ export interface Checkpoint {
   reasons: string[]
 }
 
+export interface WeatherStats {
+  max_wind_mph: number
+  max_gust_mph: number
+  max_rain_in_hr: number
+  max_snow_in_hr: number
+  min_temperature_f: number
+  max_temperature_f: number
+  wet_miles: number
+  snow_miles: number
+}
+
+export interface Hazard {
+  from_mile: number
+  to_mile: number
+  from_eta: string
+  to_eta: string
+  risk: RiskLabel
+  reasons: string[]
+}
+
+export interface RiskSegment {
+  risk: RiskLabel
+  coordinates: [number, number][]
+}
+
 export interface Route {
   id: number
   rank: number
@@ -39,6 +64,9 @@ export interface Route {
   average_risk: number
   max_risk: RiskLabel
   geometry: [number, number][]
+  risk_segments: RiskSegment[]
+  weather: WeatherStats
+  hazards: Hazard[]
   checkpoints: Checkpoint[]
   notices: string[]
 }

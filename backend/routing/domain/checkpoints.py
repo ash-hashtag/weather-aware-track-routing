@@ -87,13 +87,32 @@ def sample_checkpoints(track: Track, interval_mi: float, departure: datetime) ->
 
 
 def _checkpoint_at(track: Track, mile: float, departure: datetime) -> Checkpoint:
-    i = max(1, min(bisect.bisect_left(track.cum_miles, mile), len(track.cum_miles) - 1))
-    m0, m1 = track.cum_miles[i - 1], track.cum_miles[i]
-    t = (mile - m0) / (m1 - m0) if m1 > m0 else 0.0
-    (lat0, lng0), (lat1, lng1) = track.points[i - 1], track.points[i]
+    i, t = _locate(track, mile)
     seconds = track.cum_seconds[i - 1] + t * (track.cum_seconds[i] - track.cum_seconds[i - 1])
     return Checkpoint(
         mile=mile,
-        position=(lat0 + t * (lat1 - lat0), lng0 + t * (lng1 - lng0)),
+        position=_position_at(track, mile),
         eta=departure + timedelta(seconds=seconds),
     )
+
+
+def slice_track(track: Track, start_mi: float, end_mi: float) -> list[LatLng]:
+    """The track's geometry between two mile marks, with interpolated endpoints."""
+    start = _position_at(track, start_mi)
+    end = _position_at(track, end_mi)
+    lo = bisect.bisect_right(track.cum_miles, start_mi)
+    hi = bisect.bisect_left(track.cum_miles, end_mi)
+    return [start, *track.points[lo:hi], end]
+
+
+def _locate(track: Track, mile: float) -> tuple[int, float]:
+    """Segment index i (between vertices i-1 and i) containing `mile`, and the fraction along it."""
+    i = max(1, min(bisect.bisect_left(track.cum_miles, mile), len(track.cum_miles) - 1))
+    m0, m1 = track.cum_miles[i - 1], track.cum_miles[i]
+    return i, (mile - m0) / (m1 - m0) if m1 > m0 else 0.0
+
+
+def _position_at(track: Track, mile: float) -> LatLng:
+    i, t = _locate(track, mile)
+    (lat0, lng0), (lat1, lng1) = track.points[i - 1], track.points[i]
+    return (lat0 + t * (lat1 - lat0), lng0 + t * (lng1 - lng0))

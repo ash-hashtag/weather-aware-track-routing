@@ -150,6 +150,71 @@ body {
   border-radius: 999px;
 }
 
+.badge-muted {
+  color: var(--text);
+  background: var(--border);
+}
+
+.trade-off {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.weather-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px 8px;
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.weather-metrics dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.weather-metrics dd {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.weather-metrics small {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.hazards {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.hazards li {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.hazards .dot {
+  flex: none;
+}
+
+.hazard-reasons,
+.hazards-more,
+.hazards-none {
+  color: var(--muted);
+}
+
+.hazards-none {
+  font-size: 12px;
+}
+
 .route-max {
   margin-left: auto;
   font-size: 12px;

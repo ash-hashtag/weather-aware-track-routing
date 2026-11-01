@@ -74,10 +74,11 @@ export function RouteMap({ plan, selectedRouteId, onSelectRoute }: Props) {
     const map = mapRef.current
     if (!map || !ready) return
     const routes = map.getSource<GeoJSONSource>('routes')
+    const riskSegments = map.getSource<GeoJSONSource>('risk-segments')
     const checkpoints = map.getSource<GeoJSONSource>('checkpoints')
     const endpoints = map.getSource<GeoJSONSource>('endpoints')
     if (!plan) {
-      for (const source of [routes, checkpoints, endpoints]) source?.setData(EMPTY)
+      for (const source of [routes, riskSegments, checkpoints, endpoints]) source?.setData(EMPTY)
       return
     }
     routes?.setData({
@@ -87,6 +88,16 @@ export function RouteMap({ plan, selectedRouteId, onSelectRoute }: Props) {
         properties: { id: r.id },
         geometry: { type: 'LineString', coordinates: r.geometry },
       })),
+    })
+    riskSegments?.setData({
+      type: 'FeatureCollection',
+      features: plan.routes.flatMap((r) =>
+        r.risk_segments.map((seg) => ({
+          type: 'Feature' as const,
+          properties: { routeId: r.id, risk: seg.risk },
+          geometry: { type: 'LineString' as const, coordinates: seg.coordinates },
+        })),
+      ),
     })
     checkpoints?.setData({
       type: 'FeatureCollection',
@@ -118,10 +129,13 @@ export function RouteMap({ plan, selectedRouteId, onSelectRoute }: Props) {
     const selected = selectedRouteId ?? -1
     const isSelected: maplibregl.ExpressionSpecification = ['==', ['get', 'id'], selected]
     const cpSelected: maplibregl.ExpressionSpecification = ['==', ['get', 'routeId'], selected]
-    map.setPaintProperty('route-lines', 'line-color', ['case', isSelected, '#1d4ed8', '#94a3b8'])
+    // The selected route is drawn by the risk layers on top; these restyle the others.
+    map.setPaintProperty('route-lines', 'line-color', ['case', isSelected, '#1e293b', '#94a3b8'])
     map.setPaintProperty('route-lines', 'line-width', ['case', isSelected, 6, 4])
     map.setLayoutProperty('route-lines', 'line-sort-key', ['case', isSelected, 1, 0])
-    map.setPaintProperty('checkpoints', 'circle-radius', ['case', cpSelected, 6, 3.5])
+    map.setFilter('risk-casing', cpSelected)
+    map.setFilter('risk-segments', cpSelected)
+    map.setPaintProperty('checkpoints', 'circle-radius', ['case', cpSelected, 4.5, 3])
     map.setPaintProperty('checkpoints', 'circle-opacity', ['case', cpSelected, 1, 0.55])
     map.setLayoutProperty('checkpoints', 'circle-sort-key', [
       '+',
@@ -135,8 +149,16 @@ export function RouteMap({ plan, selectedRouteId, onSelectRoute }: Props) {
 
 const EMPTY: FeatureCollection = { type: 'FeatureCollection', features: [] }
 
+const RISK_COLOR_EXPRESSION = [
+  'match',
+  ['get', 'risk'],
+  ...Object.entries(RISK_COLORS).flat(),
+  '#888888',
+] as unknown as maplibregl.ExpressionSpecification
+
 function addLayers(map: maplibregl.Map) {
   map.addSource('routes', { type: 'geojson', data: EMPTY })
+  map.addSource('risk-segments', { type: 'geojson', data: EMPTY })
   map.addSource('checkpoints', { type: 'geojson', data: EMPTY })
   map.addSource('endpoints', { type: 'geojson', data: EMPTY })
 
@@ -154,17 +176,29 @@ function addLayers(map: maplibregl.Map) {
     layout: { 'line-join': 'round', 'line-cap': 'round' },
     paint: { 'line-color': '#94a3b8', 'line-width': 4 },
   })
+  // Selected route only (filtered on selection): risk-coloured line with a dark outline.
+  map.addLayer({
+    id: 'risk-casing',
+    type: 'line',
+    source: 'risk-segments',
+    filter: ['==', ['get', 'routeId'], -1],
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#1e293b', 'line-width': 10 },
+  })
+  map.addLayer({
+    id: 'risk-segments',
+    type: 'line',
+    source: 'risk-segments',
+    filter: ['==', ['get', 'routeId'], -1],
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': RISK_COLOR_EXPRESSION, 'line-width': 6 },
+  })
   map.addLayer({
     id: 'checkpoints',
     type: 'circle',
     source: 'checkpoints',
     paint: {
-      'circle-color': [
-        'match',
-        ['get', 'risk'],
-        ...Object.entries(RISK_COLORS).flat(),
-        '#888888',
-      ] as unknown as maplibregl.ExpressionSpecification,
+      'circle-color': RISK_COLOR_EXPRESSION,
       'circle-radius': 4,
       'circle-stroke-color': '#ffffff',
       'circle-stroke-width': 1.5,

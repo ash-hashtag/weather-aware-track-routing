@@ -1,13 +1,22 @@
 """Orchestrates a trip plan: geocode → truck routes → checkpoints → weather → risk → ranking."""
 
+import itertools
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import TypedDict
 
-from routing.domain.checkpoints import Checkpoint, Span, Track, build_track, sample_checkpoints
+from routing.domain.checkpoints import (
+    Checkpoint,
+    Span,
+    Track,
+    build_track,
+    sample_checkpoints,
+    slice_track,
+)
 from routing.domain.geo import LatLng, decode_flexible_polyline, simplify
 from routing.domain.recommend import RouteCandidate, explain, rank, summarize_risk
 from routing.domain.risk import RiskAssessment, RiskLevel, Weather, assess
+from routing.domain.summary import AssessedPoint, hazards, weather_stats
 from routing.services.here import HereClient, HereRoute, Place
 from routing.services.weather import OpenMeteoClient
 
@@ -50,6 +59,31 @@ class CheckpointOut(TypedDict):
     reasons: list[str]
 
 
+class WeatherStatsOut(TypedDict):
+    max_wind_mph: float
+    max_gust_mph: float
+    max_rain_in_hr: float
+    max_snow_in_hr: float
+    min_temperature_f: float
+    max_temperature_f: float
+    wet_miles: float
+    snow_miles: float
+
+
+class HazardOut(TypedDict):
+    from_mile: float
+    to_mile: float
+    from_eta: str
+    to_eta: str
+    risk: str
+    reasons: list[str]
+
+
+class RiskSegmentOut(TypedDict):
+    risk: str
+    coordinates: list[tuple[float, float]]  # [lng, lat]
+
+
 class RouteOut(TypedDict):
     id: int
     rank: int
@@ -62,6 +96,9 @@ class RouteOut(TypedDict):
     average_risk: float
     max_risk: str
     geometry: list[tuple[float, float]]  # [lng, lat], GeoJSON order
+    risk_segments: list[RiskSegmentOut]
+    weather: WeatherStatsOut
+    hazards: list[HazardOut]
     checkpoints: list[CheckpointOut]
     notices: list[str]
 
@@ -95,9 +132,11 @@ def plan_trip(request: PlanRequest, here: HereClient, weather: OpenMeteoClient) 
     )
     weather_iter = iter(series)
     assessed: list[list[tuple[Checkpoint, Weather, RiskAssessment]]] = []
+    scales: list[float] = []
     for route, track, cps in zip(routes, tracks, checkpoints, strict=True):
         # Report miles on HERE's road distance rather than our straight-segment estimate.
         scale = route.length_m / METERS_PER_MILE / track.length_mi
+        scales.append(scale)
         rows = []
         for cp in cps:
             w = next(weather_iter).at(cp.eta)
@@ -125,7 +164,15 @@ def plan_trip(request: PlanRequest, here: HereClient, weather: OpenMeteoClient) 
         recommendation_reason=explain(candidates[best], runner_up),
         routes=[
             _route_out(
-                i, order.index(i) + 1, i == best, route, track, rows, candidates[i], departure
+                i,
+                order.index(i) + 1,
+                i == best,
+                route,
+                track,
+                scales[i],
+                rows,
+                candidates[i],
+                departure,
             )
             for i, (route, track, rows) in enumerate(zip(routes, tracks, assessed, strict=True))
         ],
@@ -157,11 +204,14 @@ def _route_out(
     recommended: bool,
     route: HereRoute,
     track: Track,
+    scale: float,
     rows: list[tuple[Checkpoint, Weather, RiskAssessment]],
     candidate: RouteCandidate,
     departure: datetime,
 ) -> RouteOut:
     risk = candidate.risk
+    points = [AssessedPoint(cp.mile, cp.eta, w, a.level, a.reasons) for cp, w, a in rows]
+    stats = weather_stats(points)
     return RouteOut(
         id=route_id,
         rank=route_rank,
@@ -177,9 +227,56 @@ def _route_out(
             (round(lng, 5), round(lat, 5))
             for lat, lng in simplify(track.points, DISPLAY_TOLERANCE_DEG)
         ],
+        risk_segments=_risk_segments(track, scale, points),
+        weather=WeatherStatsOut(
+            max_wind_mph=round(stats.max_wind_mph, 1),
+            max_gust_mph=round(stats.max_gust_mph, 1),
+            max_rain_in_hr=round(stats.max_rain_in_hr, 3),
+            max_snow_in_hr=round(stats.max_snow_in_hr, 3),
+            min_temperature_f=round(stats.min_temperature_f, 1),
+            max_temperature_f=round(stats.max_temperature_f, 1),
+            wet_miles=round(stats.wet_miles, 1),
+            snow_miles=round(stats.snow_miles, 1),
+        ),
+        hazards=[
+            HazardOut(
+                from_mile=round(h.from_mile, 1),
+                to_mile=round(h.to_mile, 1),
+                from_eta=h.from_eta.isoformat(timespec="seconds"),
+                to_eta=h.to_eta.isoformat(timespec="seconds"),
+                risk=h.level.label,
+                reasons=list(h.reasons),
+            )
+            for h in hazards(points)
+        ],
         checkpoints=[_checkpoint_out(cp, w, a) for cp, w, a in rows],
         notices=route.notices,
     )
+
+
+def _risk_segments(track: Track, scale: float, points: list[AssessedPoint]) -> list[RiskSegmentOut]:
+    """Route geometry split at checkpoints and coloured by risk; equal neighbours are merged."""
+    runs: list[tuple[RiskLevel, float, float]] = []  # (level, from_mile, to_mile) in road miles
+    for a, b in itertools.pairwise(points):
+        level = max(a.level, b.level)
+        if runs and runs[-1][0] == level:
+            runs[-1] = (level, runs[-1][1], b.mile)
+        else:
+            runs.append((level, a.mile, b.mile))
+    return [
+        RiskSegmentOut(
+            risk=level.label,
+            coordinates=[
+                (round(lng, 5), round(lat, 5))
+                for lat, lng in simplify(
+                    # Checkpoint miles are road miles; the track is measured in its own miles.
+                    slice_track(track, start / scale, end / scale),
+                    DISPLAY_TOLERANCE_DEG,
+                )
+            ],
+        )
+        for level, start, end in runs
+    ]
 
 
 def _checkpoint_out(cp: Checkpoint, w: Weather, a: RiskAssessment) -> CheckpointOut:

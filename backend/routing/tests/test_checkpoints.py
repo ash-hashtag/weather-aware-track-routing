@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from routing.domain.checkpoints import Span, build_track, sample_checkpoints
+from routing.domain.checkpoints import Span, build_track, sample_checkpoints, slice_track
 from routing.domain.geo import haversine_mi
 
 DEPARTURE = datetime(2026, 11, 2, 8, tzinfo=UTC)
@@ -37,3 +37,13 @@ def test_interval_longer_than_route() -> None:
     track = build_track(LINE, [], total_duration_s=3600)
     cps = sample_checkpoints(track, 100, DEPARTURE)
     assert [round(cp.mile) for cp in cps] == [0, 69]
+
+
+def test_slice_track_interpolates_endpoints_and_keeps_inner_vertices() -> None:
+    track = build_track(LINE, [], total_duration_s=3600)
+    half = track.length_mi / 2
+    sliced = slice_track(track, half / 2, half * 1.5)
+    assert sliced[0] == pytest.approx((0.25, 0.0))
+    assert sliced[1] == (0.5, 0.0)
+    assert sliced[-1] == pytest.approx((0.75, 0.0))
+    assert len(sliced) == 3
